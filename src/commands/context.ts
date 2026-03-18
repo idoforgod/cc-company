@@ -1,0 +1,43 @@
+import * as fs from 'fs'
+import * as path from 'path'
+import { FsStore } from '../store/fs-store.js'
+import { AgentService } from '../services/agent.service.js'
+import { ResourceService } from '../services/resource.service.js'
+import { RunService } from '../services/run.service.js'
+import { RunLogger } from '../logger/run-logger.js'
+
+export interface CommandContext {
+  rootPath: string
+  store: FsStore
+  agentService: AgentService
+  resourceService: ResourceService
+  runService: RunService
+}
+
+export function getRootPath(): string {
+  return path.join(process.cwd(), '.cc-company')
+}
+
+export function ensureInitialized(): void {
+  const rootPath = getRootPath()
+  if (!fs.existsSync(rootPath)) {
+    console.error('cc-company가 초기화되지 않았습니다. `cc-company init`을 먼저 실행하세요.')
+    process.exit(1)
+  }
+}
+
+export function createContext(): CommandContext {
+  ensureInitialized()
+
+  const rootPath = getRootPath()
+  const store = new FsStore(rootPath)
+  const logger = new RunLogger(path.join(rootPath, 'runs'))
+
+  return {
+    rootPath,
+    store,
+    agentService: new AgentService(store),
+    resourceService: new ResourceService(store),
+    runService: new RunService(store, rootPath, logger),
+  }
+}

@@ -1,11 +1,119 @@
-동의한다. 나는 이 phase들을 각각 별도의 claude session을 spawn해서 직렬로 개발하고싶다.  
-이를 위해 다음과 같은 준비가 필요하다.
+# Task Creation Prompt
 
-1. 먼저 `/tasks` 폴더를 만들고, 각 phase의 상세프롬프트/참조문서/AC/주의사항/추가관련내용을 담은 `phase{N}.md` 파일을 각각 생성한다. 같은  
-   경로에 `index.json`도 생성하여, 현재 진행상태를 기록한다.
-2. python script를 이용해 claude를 spawn한다. loop로 index.json을 읽고 다음 phase에 대해 claude cli를 호출한다. output은 `phase{N}.md`와  
-   같은 경로에 `phase{N}-output.json`으로 저장한다. 이떄 `phase{N}.md`파일을 읽으라고 프롬프트에 작성하는 대신, 해당 파일 내용 자체가  
-   프롬프트에 그대로 작성되도록 한다. index.json을 잘 업데이트하라는 내용이 포함되어야한다. AC 통과에 실패한 경우, index.json에 해당 phase를
-   error로 표시하게한다. loop에서 마지막 phase가 error인 경우 탈출하고 사용자에게 메세지를 노출한다.
+이 프롬프트는 구현 계획이 컨텍스트에 존재하는 상태에서, 직렬 phase 실행을 위한 태스크 파일들을 생성한다.
 
-피드백을 부탁한다.
+---
+
+## 지시사항
+
+컨텍스트에 존재하는 구현 계획(phase 목록, 각 phase의 작업 내용, 의존성, AC 등)을 기반으로 아래 산출물을 생성하라.
+
+### 1. `/tasks/index.json`
+
+```json
+{
+  "project": "<프로젝트명>",
+  "totalPhases": <N>,
+  "phases": [
+    { "phase": 0, "name": "<phase-slug>", "status": "pending" },
+    ...
+  ]
+}
+```
+
+- `name`은 kebab-case slug. 해당 phase의 핵심 모듈/작업을 한 단어~두 단어로 표현.
+- 모든 phase의 초기 status는 `"pending"`.
+
+### 2. `/tasks/phase{N}.md` (각 phase마다 1개)
+
+각 파일은 **독립적인 claude session이 이 파일 하나만 보고 작업을 완수할 수 있을 정도로** 자기완결적이어야 한다.
+반드시 아래 구조를 따르라:
+
+```markdown
+# Phase {N}: {Phase 이름}
+
+## 사전 준비
+
+먼저 아래 문서들을 반드시 읽고 프로젝트의 전체 아키텍처와 설계 의도를 완전히 이해하라:
+- {관련 문서 경로 나열 — spec, architecture, ADR 등}
+
+그리고 이전 phase의 작업물을 반드시 확인하라:
+- {이전 phase에서 생성/수정된 파일 경로 나열}
+
+이전 phase에서 만들어진 코드를 꼼꼼히 읽고, 설계 의도를 이해한 뒤 작업하라.
+
+## 작업 내용
+
+{구체적인 구현 지시. 파일 경로, 클래스/함수 시그니처, 로직 설명을 포함.
+ 코드 스니펫은 인터페이스/시그니처 수준만 제시하고, 구현체는 에이전트에게 맡겨라.
+ 단, 설계 의도에서 벗어나면 안 되는 핵심 규칙은 명확히 박아넣어라.}
+
+## Acceptance Criteria
+
+{구체적인 검증 커맨드. 예:}
+\`\`\`bash
+npm run build    # 컴파일 에러 없음
+npm test         # 모든 테스트 통과
+\`\`\`
+
+## AC 검증 방법
+
+위 AC 커맨드를 실행하라. 모두 통과하면 `/tasks/index.json`의 phase {N} status를 `"completed"`로 변경하라.
+수정 3회 이상 시도해도 실패하면 status를 `"error"`로 변경하고, 에러 내용을 index.json의 해당 phase에 `"error_message"` 필드로 기록하라.
+
+## 주의사항
+
+- {이 phase에서 하지 말아야 할 것, 엣지 케이스, 호환성 주의사항 등}
+- 기존 테스트를 깨뜨리지 마라.
+```
+
+#### phase 파일 작성 원칙
+
+1. **자기완결성**: 각 phase 파일은 독립 session에서 실행된다. "이전 대화에서 논의한 바와 같이" 같은 참조 금지. 필요한 정보는 전부 파일 안에 적어라.
+2. **사전 준비 필수**: 관련 문서 경로 + 이전 phase 산출물 경로를 명시. session이 코드를 읽고 맥락을 파악한 뒤 작업하도록 강제.
+3. **시그니처 수준 지시**: 함수/클래스의 인터페이스만 제시. 내부 구현은 에이전트 재량. 단, 핵심 비즈니스 규칙(멱등성, 보안, 데이터 무결성 등)은 반드시 명시.
+4. **AC는 실행 가능한 커맨드로**: "~가 동작해야 한다" 같은 추상적 서술 금지. `npm run build && npm test` 같은 실행 가능한 커맨드.
+5. **scope 최소화**: 하나의 phase에서 하나의 레이어/모듈만 다룬다. 여러 모듈을 동시에 수정해야 하면 phase를 쪼개라.
+6. **주의사항은 구체적으로**: "조심해라" 대신 "X를 하지 마라. 이유: Y" 형식.
+
+### 3. `/run-phases.py` (runner script)
+
+이미 존재하면 덮어쓰지 않는다. 없으면 아래 동작을 하는 Python 스크립트를 생성:
+
+1. `tasks/index.json`을 읽고, 다음 `"pending"` phase를 찾는다.
+2. 해당 `phase{N}.md`의 내용을 읽어 공통 프리앰블과 합쳐 프롬프트를 구성한다.
+   - **프롬프트에 파일 경로를 넘기지 말고, 파일 내용 자체를 프롬프트에 임베딩한다.**
+3. `claude -p --dangerously-skip-permissions --output-format json "{prompt}"` 로 실행.
+4. stdout/stderr를 `tasks/phase{N}-output.json`에 저장.
+5. 실행 후 `index.json`을 다시 읽어 status 확인:
+   - `"completed"` → 다음 phase로 진행
+   - `"error"` → 에러 메시지 출력 후 종료
+   - `"pending"` (변경 안 됨) → error로 마킹 후 종료
+6. 모든 phase가 완료되면 종료.
+
+공통 프리앰블:
+```
+당신은 {프로젝트명} 프로젝트의 개발자입니다. 아래 phase의 작업을 수행하세요.
+
+중요한 규칙:
+1. 작업 전에 반드시 문서를 읽고 전체 설계를 이해하세요.
+2. 이전 phase에서 작성된 코드를 꼼꼼히 읽고, 기존 코드와의 일관성을 유지하세요.
+3. AC 검증을 직접 수행하고, 통과/실패에 따라 /tasks/index.json을 업데이트하세요.
+4. 불필요한 파일이나 코드를 추가하지 마세요. phase에 명시된 것만 작업하세요.
+5. 기존 테스트를 깨뜨리지 마세요.
+
+아래는 이번 phase의 상세 내용입니다:
+```
+
+---
+
+## 실행 예시
+
+```bash
+# 태스크 생성 후
+python3 run-phases.py
+
+# 특정 phase에서 에러 발생 시: index.json 수정 후 재실행
+# → error phase의 status를 "pending"으로 변경
+python3 run-phases.py
+```

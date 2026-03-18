@@ -1,0 +1,50 @@
+{
+  "name": "cc-company",
+  "version": "0.1.0",
+  "description": "Run Claude Code like a company — organize AI agents by role, run them with one command",
+  "main": "dist/index.js",
+  "bin": {
+    "cc-company": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "type": "module",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "ai",
+    "agent",
+    "cli",
+    "automation",
+    "developer-tools",
+    "ai-agent",
+    "llm"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/choesumin/cc-company.git"
+  },
+  "homepage": "https://github.com/choesumin/cc-company#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}
