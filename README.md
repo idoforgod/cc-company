@@ -1,6 +1,15 @@
-# cc-company
+<p align="center">
+  <img src="./assets/banner.png" alt="cc-company" width="100%" />
+</p>
 
-Run Claude Code like a company — organize AI agents by role, run them with one command.
+<p align="center">
+  <strong>Run Claude Code like a company</strong> — organize AI agents by role, run them with one command.
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/cc-company"><img src="https://img.shields.io/npm/v/cc-company.svg" alt="npm version" /></a>
+  <a href="https://github.com/choesumin/cc-company/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/cc-company.svg" alt="license" /></a>
+</p>
 
 ```bash
 npx cc-company init
@@ -10,14 +19,26 @@ cc-company run designer "Redesign the onboarding flow"
 
 ## Why?
 
-Claude Code is powerful, but every session starts from zero. No role specialization, no persistent expertise, no team structure.
+Claude Code supports subagents, skills, hooks, MCP, and settings. But there's **no way to bundle them per role.**
 
-**cc-company** gives Claude Code an org chart:
-- **Agents** = job roles (developer, designer, HR) with dedicated system prompts
-- **Subagents** = specialized skills attached to each role (git-expert, code-reviewer)
-- **Skills & Hooks** = reusable capabilities shared across agents
+A frontend developer needs a different set of subagents than a backend developer. A QA engineer and a DevOps engineer use different skills and hooks. If you're manually combining CLI flags or copying config files every time — that's the problem cc-company solves.
 
-One command, and the right agent runs with the right context.
+**cc-company bundles all Claude Code configuration into a single unit called an agent (role).**
+
+```
+cc-company agent create backend-dev
+cc-company agent backend-dev add subagent db-expert
+cc-company agent backend-dev add subagent api-designer
+cc-company agent backend-dev add skill deploy-k8s
+
+cc-company run backend-dev "Optimize the slow query on /api/users"
+# → Claude Code runs with db-expert + api-designer subagents, deploy-k8s skill,
+#   and the backend-dev system prompt — all in one command.
+```
+
+- **Agent** = a role. Bundles system prompt + subagents/skills/hooks/MCP/settings into one unit.
+- **Subagent, Skill, Hook** = managed in a shared pool. Can be shared across agents or used independently.
+- `.cc-company/` is committed to git. Your entire team shares the same agent setup.
 
 ## Install
 
