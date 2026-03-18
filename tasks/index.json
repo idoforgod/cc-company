@@ -1,0 +1,14 @@
+{
+  "project": "cc-company",
+  "totalPhases": 8,
+  "phases": [
+    { "phase": 0, "name": "project-scaffolding", "status": "pending" },
+    { "phase": 1, "name": "types", "status": "pending" },
+    { "phase": 2, "name": "store", "status": "pending" },
+    { "phase": 3, "name": "claude-runner", "status": "pending" },
+    { "phase": 4, "name": "services", "status": "pending" },
+    { "phase": 5, "name": "logger", "status": "pending" },
+    { "phase": 6, "name": "commands", "status": "pending" },
+    { "phase": 7, "name": "templates", "status": "pending" }
+  ]
+}
