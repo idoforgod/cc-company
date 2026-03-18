@@ -8,11 +8,33 @@
 
 컨텍스트에 존재하는 구현 계획(phase 목록, 각 phase의 작업 내용, 의존성, AC 등)을 기반으로 아래 산출물을 생성하라.
 
-### 1. `/tasks/index.json`
+### 0. task ID와 이름 결정
+
+- 사용자가 지정하지 않았다면, `/tasks/index.json`의 `tasks` 배열에서 마지막 `id + 1`을 새 ID로 사용.
+- 이름은 kebab-case slug. 해당 task의 핵심 목적을 한 단어~두 단어로 표현.
+- 디렉토리명: `{id}-{name}` (예: `1-auth`, `2-billing`)
+
+### 1. `/tasks/index.json` (top-level task index)
+
+이미 존재하면 `tasks` 배열에 새 항목을 추가한다. 없으면 새로 생성.
+
+```json
+{
+  "tasks": [
+    { "id": 0, "name": "mvp", "dir": "0-mvp", "status": "completed" },
+    { "id": 1, "name": "<task-name>", "dir": "1-<task-name>", "status": "pending" }
+  ]
+}
+```
+
+- `status`는 모든 phase가 완료되면 `"completed"`, 하나라도 실패하면 `"error"`, 그 외 `"pending"`.
+
+### 2. `/tasks/{id}-{name}/index.json` (task-level phase index)
 
 ```json
 {
   "project": "<프로젝트명>",
+  "task": "<task-name>",
   "totalPhases": <N>,
   "phases": [
     { "phase": 0, "name": "<phase-slug>", "status": "pending" },
@@ -24,7 +46,7 @@
 - `name`은 kebab-case slug. 해당 phase의 핵심 모듈/작업을 한 단어~두 단어로 표현.
 - 모든 phase의 초기 status는 `"pending"`.
 
-### 2. `/tasks/phase{N}.md` (각 phase마다 1개)
+### 3. `/tasks/{id}-{name}/phase{N}.md` (각 phase마다 1개)
 
 각 파일은 **독립적인 claude session이 이 파일 하나만 보고 작업을 완수할 수 있을 정도로** 자기완결적이어야 한다.
 반드시 아래 구조를 따르라:
@@ -58,7 +80,7 @@ npm test         # 모든 테스트 통과
 
 ## AC 검증 방법
 
-위 AC 커맨드를 실행하라. 모두 통과하면 `/tasks/index.json`의 phase {N} status를 `"completed"`로 변경하라.
+위 AC 커맨드를 실행하라. 모두 통과하면 `/tasks/{id}-{name}/index.json`의 phase {N} status를 `"completed"`로 변경하라.
 수정 3회 이상 시도해도 실패하면 status를 `"error"`로 변경하고, 에러 내용을 index.json의 해당 phase에 `"error_message"` 필드로 기록하라.
 
 ## 주의사항
@@ -76,20 +98,21 @@ npm test         # 모든 테스트 통과
 5. **scope 최소화**: 하나의 phase에서 하나의 레이어/모듈만 다룬다. 여러 모듈을 동시에 수정해야 하면 phase를 쪼개라.
 6. **주의사항은 구체적으로**: "조심해라" 대신 "X를 하지 마라. 이유: Y" 형식.
 
-### 3. `/run-phases.py` (runner script)
+### 4. `/run-phases.py` (runner script)
 
 이미 존재하면 덮어쓰지 않는다. 없으면 아래 동작을 하는 Python 스크립트를 생성:
 
-1. `tasks/index.json`을 읽고, 다음 `"pending"` phase를 찾는다.
-2. 해당 `phase{N}.md`의 내용을 읽어 공통 프리앰블과 합쳐 프롬프트를 구성한다.
+1. CLI 인자로 task 디렉토리명을 받는다 (예: `python3 run-phases.py 0-mvp`).
+2. `tasks/{task-dir}/index.json`을 읽고, 다음 `"pending"` phase를 찾는다.
+3. 해당 `phase{N}.md`의 내용을 읽어 공통 프리앰블과 합쳐 프롬프트를 구성한다.
    - **프롬프트에 파일 경로를 넘기지 말고, 파일 내용 자체를 프롬프트에 임베딩한다.**
-3. `claude -p --dangerously-skip-permissions --output-format json "{prompt}"` 로 실행.
-4. stdout/stderr를 `tasks/phase{N}-output.json`에 저장.
-5. 실행 후 `index.json`을 다시 읽어 status 확인:
+4. `claude -p --dangerously-skip-permissions --output-format json "{prompt}"` 로 실행.
+5. stdout/stderr를 `tasks/{task-dir}/phase{N}-output.json`에 저장.
+6. 실행 후 `{task-dir}/index.json`을 다시 읽어 status 확인:
    - `"completed"` → 다음 phase로 진행
    - `"error"` → 에러 메시지 출력 후 종료
    - `"pending"` (변경 안 됨) → error로 마킹 후 종료
-6. 모든 phase가 완료되면 종료.
+7. 모든 phase가 완료되면 `/tasks/index.json`의 해당 task status를 `"completed"`로 업데이트 후 종료.
 
 공통 프리앰블:
 ```
@@ -98,7 +121,7 @@ npm test         # 모든 테스트 통과
 중요한 규칙:
 1. 작업 전에 반드시 문서를 읽고 전체 설계를 이해하세요.
 2. 이전 phase에서 작성된 코드를 꼼꼼히 읽고, 기존 코드와의 일관성을 유지하세요.
-3. AC 검증을 직접 수행하고, 통과/실패에 따라 /tasks/index.json을 업데이트하세요.
+3. AC 검증을 직접 수행하고, 통과/실패에 따라 /tasks/{task-dir}/index.json을 업데이트하세요.
 4. 불필요한 파일이나 코드를 추가하지 마세요. phase에 명시된 것만 작업하세요.
 5. 기존 테스트를 깨뜨리지 마세요.
 
@@ -111,9 +134,9 @@ npm test         # 모든 테스트 통과
 
 ```bash
 # 태스크 생성 후
-python3 run-phases.py
+python3 run-phases.py 0-mvp
 
-# 특정 phase에서 에러 발생 시: index.json 수정 후 재실행
+# 특정 phase에서 에러 발생 시: task의 index.json 수정 후 재실행
 # → error phase의 status를 "pending"으로 변경
-python3 run-phases.py
+python3 run-phases.py 0-mvp
 ```

@@ -1,0 +1,14 @@
+{
+  "project": "cc-company",
+  "totalPhases": 8,
+  "phases": [
+    { "phase": 0, "name": "project-scaffolding", "status": "completed" },
+    { "phase": 1, "name": "types", "status": "completed" },
+    { "phase": 2, "name": "store", "status": "completed" },
+    { "phase": 3, "name": "claude-runner", "status": "completed" },
+    { "phase": 4, "name": "services", "status": "completed" },
+    { "phase": 5, "name": "logger", "status": "completed" },
+    { "phase": 6, "name": "commands", "status": "completed" },
+    { "phase": 7, "name": "templates", "status": "completed" }
+  ]
+}

@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """
 cc-company phase runner.
-Reads tasks/index.json, finds the next pending phase,
+Reads tasks/{task-dir}/index.json, finds the next pending phase,
 spawns a Claude Code session with the phase prompt, and updates status.
+
+Usage: python3 run-phases.py <task-dir>
+Example: python3 run-phases.py 0-mvp
 """
 
 import json
@@ -12,26 +15,29 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent
 TASKS_DIR = ROOT / "tasks"
-INDEX_FILE = TASKS_DIR / "index.json"
-
-COMMON_PREAMBLE = """
-당신은 cc-company 프로젝트의 개발자입니다. 아래 phase의 작업을 수행하세요.
-
-중요한 규칙:
-1. 작업 전에 반드시 /docs/ 하위 문서(spec.md, architecture.md, adr.md, testing.md, test-cases.md)를 읽고 전체 설계를 이해하세요.
-2. 이전 phase에서 작성된 코드를 꼼꼼히 읽고, 기존 코드와의 일관성을 유지하세요.
-3. AC 검증을 직접 수행하고, 통과/실패에 따라 /tasks/index.json을 업데이트하세요.
-4. 불필요한 파일이나 코드를 추가하지 마세요. phase에 명시된 것만 작업하세요.
-5. 기존 테스트를 깨뜨리지 마세요.
-
-아래는 이번 phase의 상세 내용입니다:
-
-"""
+TOP_INDEX_FILE = TASKS_DIR / "index.json"
 
 
-def load_index() -> dict:
-    with open(INDEX_FILE, "r") as f:
+def get_task_dir() -> Path:
+    if len(sys.argv) < 2:
+        print("Usage: python3 run-phases.py <task-dir>")
+        print("Example: python3 run-phases.py 0-mvp")
+        sys.exit(1)
+    task_dir = TASKS_DIR / sys.argv[1]
+    if not task_dir.is_dir():
+        print(f"ERROR: Task directory not found: {task_dir}")
+        sys.exit(1)
+    return task_dir
+
+
+def load_index(index_file: Path) -> dict:
+    with open(index_file, "r") as f:
         return json.load(f)
+
+
+def save_index(index_file: Path, data: dict):
+    with open(index_file, "w") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
 
 def find_next_phase(index: dict) -> dict | None:
@@ -48,26 +54,41 @@ def get_last_phase(index: dict) -> dict | None:
     return None
 
 
-def load_phase_prompt(phase_num: int) -> str:
-    phase_file = TASKS_DIR / f"phase{phase_num}.md"
+def load_phase_prompt(task_dir: Path, phase_num: int) -> str:
+    phase_file = task_dir / f"phase{phase_num}.md"
     if not phase_file.exists():
         print(f"ERROR: {phase_file} not found")
         sys.exit(1)
     return phase_file.read_text()
 
 
-def run_phase(phase: dict) -> dict:
+def build_preamble(project_name: str, task_dir_name: str) -> str:
+    return f"""당신은 {project_name} 프로젝트의 개발자입니다. 아래 phase의 작업을 수행하세요.
+
+중요한 규칙:
+1. 작업 전에 반드시 문서를 읽고 전체 설계를 이해하세요.
+2. 이전 phase에서 작성된 코드를 꼼꼼히 읽고, 기존 코드와의 일관성을 유지하세요.
+3. AC 검증을 직접 수행하고, 통과/실패에 따라 /tasks/{task_dir_name}/index.json을 업데이트하세요.
+4. 불필요한 파일이나 코드를 추가하지 마세요. phase에 명시된 것만 작업하세요.
+5. 기존 테스트를 깨뜨리지 마세요.
+
+아래는 이번 phase의 상세 내용입니다:
+
+"""
+
+
+def run_phase(task_dir: Path, phase: dict, preamble: str) -> dict:
     phase_num = phase["phase"]
     phase_name = phase["name"]
-    prompt_content = load_phase_prompt(phase_num)
+    prompt_content = load_phase_prompt(task_dir, phase_num)
 
-    full_prompt = COMMON_PREAMBLE + prompt_content
+    full_prompt = preamble + prompt_content
 
     print(f"\n{'='*60}")
     print(f"  Phase {phase_num}: {phase_name}")
     print(f"{'='*60}\n")
 
-    output_file = TASKS_DIR / f"phase{phase_num}-output.json"
+    output_file = task_dir / f"phase{phase_num}-output.json"
 
     cmd = [
         "claude",
@@ -85,7 +106,6 @@ def run_phase(phase: dict) -> dict:
         timeout=600,  # 10 minutes per phase
     )
 
-    # Save output
     output_data = {
         "phase": phase_num,
         "name": phase_name,
@@ -106,20 +126,40 @@ def run_phase(phase: dict) -> dict:
     return output_data
 
 
-def check_phase_status(index: dict, phase_num: int) -> str:
-    """Re-read index.json to get the updated status after Claude's run."""
-    fresh_index = load_index()
+def check_phase_status(index_file: Path, phase_num: int) -> str:
+    fresh_index = load_index(index_file)
     for phase in fresh_index["phases"]:
         if phase["phase"] == phase_num:
             return phase.get("status", "pending")
     return "pending"
 
 
+def update_top_index_status(task_dir_name: str, status: str):
+    if not TOP_INDEX_FILE.exists():
+        return
+    top_index = load_index(TOP_INDEX_FILE)
+    for task in top_index.get("tasks", []):
+        if task.get("dir") == task_dir_name:
+            task["status"] = status
+            break
+    save_index(TOP_INDEX_FILE, top_index)
+
+
 def main():
-    print("cc-company Phase Runner")
+    task_dir = get_task_dir()
+    task_dir_name = task_dir.name
+    index_file = task_dir / "index.json"
+
+    if not index_file.exists():
+        print(f"ERROR: {index_file} not found")
+        sys.exit(1)
+
+    print(f"cc-company Phase Runner — task: {task_dir_name}")
     print("=" * 60)
 
-    index = load_index()
+    index = load_index(index_file)
+    project_name = index.get("project", "cc-company")
+    preamble = build_preamble(project_name, task_dir_name)
 
     # Check if last non-pending phase is error
     last = get_last_phase(index)
@@ -127,54 +167,55 @@ def main():
         print(f"\nERROR: Phase {last['phase']} ({last['name']}) failed.")
         if "error_message" in last:
             print(f"Error: {last['error_message']}")
-        print("Fix the issue and reset the status to 'pending' in tasks/index.json to retry.")
+        print(f"Fix the issue and reset the status to 'pending' in {index_file} to retry.")
         sys.exit(1)
 
     while True:
-        index = load_index()
+        index = load_index(index_file)
         phase = find_next_phase(index)
 
         if phase is None:
             print("\nAll phases completed!")
             break
 
-        run_phase(phase)
+        run_phase(task_dir, phase, preamble)
 
         # Re-read index.json to check what Claude did
-        status = check_phase_status(index, phase["phase"])
+        status = check_phase_status(index_file, phase["phase"])
 
         if status == "error":
-            # Re-read to get error message
-            fresh_index = load_index()
+            fresh_index = load_index(index_file)
             for p in fresh_index["phases"]:
                 if p["phase"] == phase["phase"]:
                     print(f"\nERROR: Phase {phase['phase']} ({phase['name']}) failed.")
                     if "error_message" in p:
                         print(f"Error: {p['error_message']}")
                     break
-            print("Fix the issue and reset the status to 'pending' in tasks/index.json to retry.")
+            print(f"Fix the issue and reset the status to 'pending' in {index_file} to retry.")
+            update_top_index_status(task_dir_name, "error")
             sys.exit(1)
 
         if status == "completed":
             print(f"\nPhase {phase['phase']} ({phase['name']}) completed successfully.")
         elif status == "pending":
-            # Claude didn't update index.json — treat as error
             print(f"\nWARN: Phase {phase['phase']} status still 'pending' after execution.")
             print("Claude may not have updated index.json. Marking as error.")
 
-            fresh_index = load_index()
+            fresh_index = load_index(index_file)
             for p in fresh_index["phases"]:
                 if p["phase"] == phase["phase"]:
                     p["status"] = "error"
                     p["error_message"] = "Claude did not update index.json status"
                     break
-            with open(INDEX_FILE, "w") as f:
-                json.dump(fresh_index, f, indent=2, ensure_ascii=False)
-
+            save_index(index_file, fresh_index)
+            update_top_index_status(task_dir_name, "error")
             sys.exit(1)
 
+    # All phases done — update top-level index
+    update_top_index_status(task_dir_name, "completed")
+
     print("\n" + "=" * 60)
-    print("  All phases completed successfully!")
+    print(f"  Task {task_dir_name}: all phases completed!")
     print("=" * 60)
 
 
