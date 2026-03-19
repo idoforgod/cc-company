@@ -8,9 +8,12 @@ Usage: python3 run-phases.py <task-dir>
 Example: python3 run-phases.py 0-mvp
 """
 
+import itertools
 import json
 import subprocess
 import sys
+import threading
+import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -20,22 +23,17 @@ TOP_INDEX_FILE = TASKS_DIR / "index.json"
 
 KST = timezone(timedelta(hours=9))
 
+COMMIT_MSG_TEMPLATE = "feat({task_name}): phase {phase_num} — {phase_name}"
+SPINNER_CHARS = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+
+# ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
 
 def now_iso() -> str:
     return datetime.now(KST).strftime("%Y-%m-%dT%H:%M:%S%z")
     # e.g. 2026-03-19T02:09:18+0900
-
-
-def get_task_dir() -> Path:
-    if len(sys.argv) < 2:
-        print("Usage: python3 run-phases.py <task-dir>")
-        print("Example: python3 run-phases.py 0-mvp")
-        sys.exit(1)
-    task_dir = TASKS_DIR / sys.argv[1]
-    if not task_dir.is_dir():
-        print(f"ERROR: Task directory not found: {task_dir}")
-        sys.exit(1)
-    return task_dir
 
 
 def load_index(index_file: Path) -> dict:
@@ -62,6 +60,18 @@ def get_last_phase(index: dict) -> dict | None:
     return None
 
 
+def get_task_dir() -> Path:
+    if len(sys.argv) < 2:
+        print("Usage: python3 run-phases.py <task-dir>")
+        print("Example: python3 run-phases.py 0-mvp")
+        sys.exit(1)
+    task_dir = TASKS_DIR / sys.argv[1]
+    if not task_dir.is_dir():
+        print(f"ERROR: Task directory not found: {task_dir}")
+        sys.exit(1)
+    return task_dir
+
+
 def load_phase_prompt(task_dir: Path, phase_num: int) -> str:
     phase_file = task_dir / f"phase{phase_num}.md"
     if not phase_file.exists():
@@ -70,7 +80,109 @@ def load_phase_prompt(task_dir: Path, phase_num: int) -> str:
     return phase_file.read_text()
 
 
-def build_preamble(project_name: str, task_dir_name: str) -> str:
+# ---------------------------------------------------------------------------
+# Git helpers
+# ---------------------------------------------------------------------------
+
+def git_run(*args) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", *args], cwd=str(ROOT), capture_output=True, text=True
+    )
+
+
+def git_ensure_branch(task_name: str):
+    branch = f"feat-{task_name}"
+
+    # Current branch
+    r = git_run("rev-parse", "--abbrev-ref", "HEAD")
+    if r.returncode != 0:
+        print(f"ERROR: git not available or not a git repo.\n{r.stderr.strip()}")
+        sys.exit(1)
+    current = r.stdout.strip()
+
+    if current == branch:
+        return  # already on the branch (resume)
+
+    # Check if branch exists
+    r = git_run("rev-parse", "--verify", branch)
+    if r.returncode == 0:
+        # Branch exists — checkout
+        r = git_run("checkout", branch)
+    else:
+        # Create new branch
+        r = git_run("checkout", "-b", branch)
+
+    if r.returncode != 0:
+        print(f"ERROR: Failed to checkout branch '{branch}'.")
+        print(f"  {r.stderr.strip()}")
+        print("Hint: stash or commit your changes first.")
+        sys.exit(1)
+
+    print(f"  Branch: {branch}")
+
+
+def git_commit_phase(task_name: str, phase_num: int, phase_name: str) -> bool:
+    """Fallback commit — runs only if Claude left uncommitted changes."""
+    git_run("add", "-A")
+
+    # Nothing staged → Claude already committed (or no changes)
+    if git_run("diff", "--cached", "--quiet").returncode == 0:
+        return False
+
+    msg = COMMIT_MSG_TEMPLATE.format(
+        task_name=task_name, phase_num=phase_num, phase_name=phase_name
+    )
+    r = git_run("commit", "-m", msg)
+    if r.returncode != 0:
+        print(f"  WARN: fallback commit failed: {r.stderr.strip()}")
+        return False
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Spinner
+# ---------------------------------------------------------------------------
+
+class Spinner:
+    def __init__(self, message: str):
+        self._message = message
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._spin, daemon=True)
+        self._start_time = 0.0
+
+    def _spin(self):
+        chars = itertools.cycle(SPINNER_CHARS)
+        while not self._stop.is_set():
+            elapsed = int(time.monotonic() - self._start_time)
+            sys.stderr.write(f"\r{next(chars)} {self._message} [{elapsed}s]")
+            sys.stderr.flush()
+            self._stop.wait(0.1)
+        # Clear the line
+        sys.stderr.write("\r" + " " * (len(self._message) + 20) + "\r")
+        sys.stderr.flush()
+
+    def __enter__(self):
+        self._start_time = time.monotonic()
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_):
+        self._stop.set()
+        self._thread.join()
+
+    @property
+    def elapsed(self) -> float:
+        return time.monotonic() - self._start_time
+
+
+# ---------------------------------------------------------------------------
+# Preamble & phase execution
+# ---------------------------------------------------------------------------
+
+def build_preamble(project_name: str, task_dir_name: str, task_name: str) -> str:
+    commit_example = COMMIT_MSG_TEMPLATE.format(
+        task_name=task_name, phase_num="N", phase_name="<phase-name>"
+    )
     return f"""당신은 {project_name} 프로젝트의 개발자입니다. 아래 phase의 작업을 수행하세요.
 
 중요한 규칙:
@@ -79,6 +191,8 @@ def build_preamble(project_name: str, task_dir_name: str) -> str:
 3. AC 검증을 직접 수행하고, 통과/실패에 따라 /tasks/{task_dir_name}/index.json을 업데이트하세요.
 4. 불필요한 파일이나 코드를 추가하지 마세요. phase에 명시된 것만 작업하세요.
 5. 기존 테스트를 깨뜨리지 마세요.
+6. AC 통과 후, index.json 업데이트까지 완료했다면, 모든 변경사항을 아래 형식으로 커밋하세요:
+   {commit_example}
 
 아래는 이번 phase의 상세 내용입니다:
 
@@ -91,10 +205,6 @@ def run_phase(task_dir: Path, phase: dict, preamble: str) -> dict:
     prompt_content = load_phase_prompt(task_dir, phase_num)
 
     full_prompt = preamble + prompt_content
-
-    print(f"\n{'='*60}")
-    print(f"  Phase {phase_num}: {phase_name}")
-    print(f"{'='*60}\n")
 
     output_file = task_dir / f"phase{phase_num}-output.json"
 
@@ -125,14 +235,16 @@ def run_phase(task_dir: Path, phase: dict, preamble: str) -> dict:
     with open(output_file, "w") as f:
         json.dump(output_data, f, indent=2, ensure_ascii=False)
 
-    print(f"Output saved to {output_file}")
-
     if result.returncode != 0:
-        print(f"\nWARN: Claude exited with code {result.returncode}")
-        print(f"stderr: {result.stderr[:500]}")
+        print(f"\n  WARN: Claude exited with code {result.returncode}")
+        print(f"  stderr: {result.stderr[:500]}")
 
     return output_data
 
+
+# ---------------------------------------------------------------------------
+# Top-level index helpers
+# ---------------------------------------------------------------------------
 
 def check_phase_status(index_file: Path, phase_num: int) -> str:
     fresh_index = load_index(index_file)
@@ -158,6 +270,10 @@ def update_top_index_status(task_dir_name: str, status: str):
     save_index(TOP_INDEX_FILE, top_index)
 
 
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 def main():
     task_dir = get_task_dir()
     task_dir_name = task_dir.name
@@ -167,27 +283,37 @@ def main():
         print(f"ERROR: {index_file} not found")
         sys.exit(1)
 
-    print(f"cc-company Phase Runner — task: {task_dir_name}")
-    print("=" * 60)
-
     index = load_index(index_file)
     project_name = index.get("project", "cc-company")
-    preamble = build_preamble(project_name, task_dir_name)
+    task_name = index.get("task", task_dir_name)
+    total_phases = index.get("totalPhases", len(index["phases"]))
+    pending_count = sum(1 for p in index["phases"] if p["status"] == "pending")
 
-    # Check if last non-pending phase is error
+    # --- Header ---
+    print(f"\n{'='*60}")
+    print(f"  cc-company Phase Runner")
+    print(f"  Task: {task_name} | Phases: {total_phases} | Pending: {pending_count}")
+    print(f"{'='*60}")
+
+    # --- Error check ---
     last = get_last_phase(index)
     if last and last["status"] == "error":
-        print(f"\nERROR: Phase {last['phase']} ({last['name']}) failed.")
+        print(f"\n  ✗ Phase {last['phase']} ({last['name']}) failed.")
         if "error_message" in last:
-            print(f"Error: {last['error_message']}")
-        print(f"Fix the issue and reset the status to 'pending' in {index_file} to retry.")
+            print(f"  Error: {last['error_message']}")
+        print(f"  Fix the issue and reset status to 'pending' in {index_file} to retry.")
         sys.exit(1)
 
-    # Set task-level created_at if not already set
+    # --- Git branch ---
+    git_ensure_branch(task_name)
+
+    # --- Preamble ---
+    preamble = build_preamble(project_name, task_dir_name, task_name)
+
+    # --- Timestamps ---
     if "created_at" not in index:
         index["created_at"] = now_iso()
         save_index(index_file, index)
-    # Set top-level task created_at if not already set
     if TOP_INDEX_FILE.exists():
         top_index = load_index(TOP_INDEX_FILE)
         for task in top_index.get("tasks", []):
@@ -196,29 +322,37 @@ def main():
                 save_index(TOP_INDEX_FILE, top_index)
                 break
 
+    # --- Phase loop ---
     while True:
         index = load_index(index_file)
         phase = find_next_phase(index)
 
         if phase is None:
-            print("\nAll phases completed!")
+            print("\n  All phases completed!")
             break
+
+        phase_num = phase["phase"]
+        phase_name = phase["name"]
+        done_count = sum(1 for p in index["phases"] if p["status"] == "completed")
 
         # Record phase created_at (= execution start)
         ts_start = now_iso()
         for p in index["phases"]:
-            if p["phase"] == phase["phase"] and "created_at" not in p:
+            if p["phase"] == phase_num and "created_at" not in p:
                 p["created_at"] = ts_start
                 save_index(index_file, index)
                 break
 
-        run_phase(task_dir, phase, preamble)
+        # Run with spinner
+        with Spinner(f"Phase {phase_num}/{total_phases - 1} ({done_count} done): {phase_name}") as sp:
+            run_phase(task_dir, phase, preamble)
+            elapsed = int(sp.elapsed)
 
         # Re-read index.json to check what Claude did
         fresh_index = load_index(index_file)
         status = None
         for p in fresh_index["phases"]:
-            if p["phase"] == phase["phase"]:
+            if p["phase"] == phase_num:
                 status = p.get("status", "pending")
                 break
         status = status or "pending"
@@ -227,30 +361,33 @@ def main():
 
         if status == "error":
             for p in fresh_index["phases"]:
-                if p["phase"] == phase["phase"]:
+                if p["phase"] == phase_num:
                     p["failed_at"] = ts_end
-                    print(f"\nERROR: Phase {phase['phase']} ({phase['name']}) failed.")
-                    if "error_message" in p:
-                        print(f"Error: {p['error_message']}")
                     break
             save_index(index_file, fresh_index)
-            print(f"Fix the issue and reset the status to 'pending' in {index_file} to retry.")
+            print(f"  ✗ Phase {phase_num}: {phase_name} failed [{elapsed}s]")
+            for p in fresh_index["phases"]:
+                if p["phase"] == phase_num and "error_message" in p:
+                    print(f"    Error: {p['error_message']}")
+                    break
+            print(f"  Fix the issue and reset status to 'pending' in {index_file} to retry.")
             update_top_index_status(task_dir_name, "error")
             sys.exit(1)
 
         if status == "completed":
             for p in fresh_index["phases"]:
-                if p["phase"] == phase["phase"]:
+                if p["phase"] == phase_num:
                     p["completed_at"] = ts_end
                     break
             save_index(index_file, fresh_index)
-            print(f"\nPhase {phase['phase']} ({phase['name']}) completed successfully.")
+            git_commit_phase(task_name, phase_num, phase_name)
+            print(f"  ✓ Phase {phase_num}: {phase_name} completed [{elapsed}s]")
         elif status == "pending":
-            print(f"\nWARN: Phase {phase['phase']} status still 'pending' after execution.")
-            print("Claude may not have updated index.json. Marking as error.")
+            print(f"  ✗ Phase {phase_num}: {phase_name} — status still 'pending' after execution")
+            print("    Claude did not update index.json. Marking as error.")
 
             for p in fresh_index["phases"]:
-                if p["phase"] == phase["phase"]:
+                if p["phase"] == phase_num:
                     p["status"] = "error"
                     p["error_message"] = "Claude did not update index.json status"
                     p["failed_at"] = ts_end
@@ -259,15 +396,15 @@ def main():
             update_top_index_status(task_dir_name, "error")
             sys.exit(1)
 
-    # All phases done — record task-level completed_at and update top-level index
+    # All phases done
     index = load_index(index_file)
     index["completed_at"] = now_iso()
     save_index(index_file, index)
     update_top_index_status(task_dir_name, "completed")
 
-    print("\n" + "=" * 60)
+    print(f"\n{'='*60}")
     print(f"  Task {task_dir_name}: all phases completed!")
-    print("=" * 60)
+    print(f"{'='*60}")
 
 
 if __name__ == "__main__":

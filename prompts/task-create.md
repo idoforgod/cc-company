@@ -129,6 +129,8 @@ npm test         # 모든 테스트 통과
 3. AC 검증을 직접 수행하고, 통과/실패에 따라 /tasks/{task-dir}/index.json을 업데이트하세요.
 4. 불필요한 파일이나 코드를 추가하지 마세요. phase에 명시된 것만 작업하세요.
 5. 기존 테스트를 깨뜨리지 마세요.
+6. AC 통과 후, index.json 업데이트까지 완료했다면, 모든 변경사항을 아래 형식으로 커밋하세요:
+   feat({task-name}): phase {N} — {phase-name}
 
 아래는 이번 phase의 상세 내용입니다:
 ```
@@ -145,3 +147,11 @@ python3 run-phases.py 0-mvp
 # → error phase의 status를 "pending"으로 변경
 python3 run-phases.py 0-mvp
 ```
+
+### run-phases.py 자동 동작
+
+- `feat-{task-name}` 브랜치를 자동 생성/체크아웃 (이미 존재하면 resume)
+- 각 phase 완료 후 자동 커밋: `feat({task-name}): phase {N} — {phase-name}`
+  - 커밋 메시지 템플릿은 `run-phases.py`의 `COMMIT_MSG_TEMPLATE` 상수로 관리
+  - 프롬프트에 삽입되어 Claude가 직접 커밋하되, 누락 시 러너가 fallback 커밋 수행
+- 스피너 + 진행상황 표시 (현재 phase / 전체 phase / 경과시간)

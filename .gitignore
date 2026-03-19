@@ -3,5 +3,6 @@ dist/
 *.tgz
 *.log
 .DS_Store
+__pycache__/
 
 .cc-company
