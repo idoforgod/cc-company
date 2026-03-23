@@ -50,7 +50,9 @@
     {
       "phase": 6,
       "name": "merge-logic",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-03-23T19:50:03+0900",
+      "completed_at": "2026-03-23T19:52:20+0900"
     },
     {
       "phase": 7,

@@ -1,4 +1,6 @@
 import type { Ticket, TicketServerConfig, AgentConfig } from '../types/index.js'
+import { MergeService } from './merge.service.js'
+import { GhClient } from '../gh-client/index.js'
 
 export interface RunClaudeResult {
   exitCode: number
@@ -9,6 +11,7 @@ export interface AgentRunnerDeps {
   serverUrl: string
   config: TicketServerConfig
   agentConfig: AgentConfig
+  workingDir: string
   // 기존 run.service의 claude 실행 로직을 재사용
   runClaude: (prompt: string, agentConfig: AgentConfig) => RunClaudeResult
 }
@@ -16,9 +19,16 @@ export interface AgentRunnerDeps {
 export class AgentRunnerService {
   private alive = true
   private lastActivityAt: number
+  private mergeService: MergeService
 
   constructor(private deps: AgentRunnerDeps) {
     this.lastActivityAt = Date.now()
+    // MergeService 초기화
+    this.mergeService = new MergeService({
+      ghClient: new GhClient(deps.agentConfig.gh_user),
+      serverUrl: deps.serverUrl,
+      workingDir: deps.workingDir,
+    })
   }
 
   /**
@@ -213,10 +223,40 @@ ${parent.prompt}
     return result
   }
 
-  private processTask(ticket: Ticket): RunClaudeResult {
+  private async processTask(ticket: Ticket): Promise<RunClaudeResult> {
     const { runClaude, agentConfig } = this.deps
 
-    // Claude 실행
+    // merge ticket인지 확인 (review_approved 이벤트로 생성된 ticket)
+    if (
+      ticket.metadata?.github?.eventType === 'review_approved' &&
+      ticket.metadata?.github?.prUrl
+    ) {
+      // MergeService로 처리
+      const mergeResult = await this.mergeService.executeMerge(
+        ticket.metadata.github.prUrl,
+        agentConfig
+      )
+
+      if (mergeResult.success) {
+        return {
+          exitCode: 0,
+          output: `PR merged successfully`,
+        }
+      } else if (mergeResult.conflicted) {
+        // conflict_resolve ticket이 생성됨
+        return {
+          exitCode: 0, // ticket 생성 성공이므로 0
+          output: `Conflict detected. Created conflict_resolve ticket.`,
+        }
+      } else {
+        return {
+          exitCode: 1,
+          output: `Merge failed: ${mergeResult.error}`,
+        }
+      }
+    }
+
+    // 기존 로직: Claude 실행
     return runClaude(ticket.prompt, agentConfig)
   }
 
