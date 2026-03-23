@@ -43,6 +43,11 @@ ticketsRouter.get('/:id', async (req, res, next) => {
 ticketsRouter.post('/', async (req, res, next) => {
   try {
     const { title, prompt, assignee, cc, priority, createdBy } = req.body
+
+    if (!title || !prompt || !assignee) {
+      return res.status(400).json({ error: 'title, prompt, and assignee are required' })
+    }
+
     const ticket = await req.ticketService.createTicket({
       title,
       prompt,
@@ -153,6 +158,11 @@ ticketsRouter.put('/:id/log', async (req, res, next) => {
 ticketsRouter.post('/:id/comments', async (req, res, next) => {
   try {
     const { author, content } = req.body
+
+    if (!author || !content) {
+      return res.status(400).json({ error: 'author and content are required' })
+    }
+
     const comment = await req.ticketService.addComment(req.params.id, { author, content })
     res.status(201).json(comment)
   } catch (error) {
