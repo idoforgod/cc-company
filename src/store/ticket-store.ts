@@ -8,6 +8,7 @@ import type {
 
 export interface ITicketStore {
   // CRUD
+  // metadata는 optional이므로 input에 포함 가능
   create(
     input: Omit<Ticket, 'id' | 'version' | 'comments' | 'createdAt'>
   ): Promise<Ticket>

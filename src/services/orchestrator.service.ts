@@ -6,9 +6,13 @@ import * as http from 'http'
 import type { Express } from 'express'
 import { createApp } from '../server/index.js'
 import { TicketService } from './ticket.service.js'
+import { PrEventService } from './pr-event.service.js'
 import { FsTicketStore } from '../store/fs-ticket-store.js'
 import { AgentStatusStore } from '../store/agent-status-store.js'
 import { FsStore } from '../store/fs-store.js'
+import { SmeeReceiver } from '../webhook-receiver/smee-receiver.js'
+import { GhClient } from '../gh-client/index.js'
+import type { IWebhookReceiver } from '../webhook-receiver/index.js'
 import type { TicketServerConfig, GlobalConfig } from '../types/index.js'
 
 export interface OrchestratorConfig {
@@ -27,14 +31,16 @@ export class OrchestratorService {
   private server: http.Server | null = null
   private workers: Map<string, ChildProcess> = new Map()
   private shuttingDown = false
+  private webhookReceiver: IWebhookReceiver | null = null
 
   constructor(private config: OrchestratorConfig) {}
 
   /**
    * 시스템 시작
    * 1. Ticket Server 시작
-   * 2. 모든 agent worker spawn
-   * 3. Shutdown 핸들러 등록
+   * 2. Webhook Receiver 시작 (설정 시)
+   * 3. 모든 agent worker spawn
+   * 4. Shutdown 핸들러 등록
    */
   async start(): Promise<void> {
     const { basePath, ticketServerConfig } = this.config
@@ -49,14 +55,43 @@ export class OrchestratorService {
 
     // 2. Service 초기화
     const ticketService = new TicketService(ticketStore, store)
+    const globalConfig = store.getGlobalConfig()
+    const webhookConfig = globalConfig.webhook
 
-    // 3. HTTP 서버 시작
-    const app = createApp({ ticketService, agentStatusStore })
+    // 3. PrEventService 초기화 (webhook이 enabled인 경우)
+    let prEventService: PrEventService | undefined
+    if (webhookConfig?.enabled) {
+      const ghClient = new GhClient()  // 기본 gh 계정 사용
+      prEventService = new PrEventService(
+        ticketService,
+        store,
+        ghClient,
+        webhookConfig
+      )
+    }
+
+    // 4. HTTP 서버 시작 (prEventService 주입)
+    const app = createApp({
+      ticketService,
+      agentStatusStore,
+      webhookSecret: webhookConfig?.secret,
+      prEventService,
+    })
     this.server = await this.startServer(app, ticketServerConfig.port)
 
     console.log(`[Orchestrator] Ticket Server started on http://localhost:${ticketServerConfig.port}`)
 
-    // 4. 모든 agent worker spawn
+    // 5. Webhook Receiver 시작 (설정 시)
+    if (webhookConfig?.enabled && webhookConfig.smeeUrl) {
+      const targetUrl = `http://localhost:${ticketServerConfig.port}/webhooks/github`
+      this.webhookReceiver = new SmeeReceiver(webhookConfig.smeeUrl, targetUrl)
+      await this.webhookReceiver.start()
+      console.log(`[Orchestrator] Webhook receiver started (smee)`)
+    } else if (webhookConfig?.enabled) {
+      console.log(`[Orchestrator] Webhook enabled (direct mode, listening on /webhooks/github)`)
+    }
+
+    // 6. 모든 agent worker spawn
     const agents = store.listAgents()
     for (const agent of agents) {
       this.spawnWorker(agent.name)
@@ -64,10 +99,10 @@ export class OrchestratorService {
 
     console.log(`[Orchestrator] Spawned ${agents.length} agent workers`)
 
-    // 5. Shutdown 핸들러 등록
+    // 7. Shutdown 핸들러 등록
     this.registerShutdownHandlers()
 
-    // 6. 서버 종료 대기 (무한 대기)
+    // 8. 서버 종료 대기 (무한 대기)
     await this.waitForShutdown()
   }
 
@@ -119,16 +154,22 @@ export class OrchestratorService {
 
       console.log('\n[Orchestrator] Shutting down...')
 
-      // 1. 모든 worker 종료 신호
+      // 1. Webhook Receiver 중지
+      if (this.webhookReceiver) {
+        await this.webhookReceiver.stop()
+        this.webhookReceiver = null
+      }
+
+      // 2. 모든 worker 종료 신호
       for (const [name, worker] of this.workers) {
         console.log(`[Orchestrator] Stopping worker '${name}'`)
         worker.kill('SIGTERM')
       }
 
-      // 2. Worker 종료 대기 (최대 5초)
+      // 3. Worker 종료 대기 (최대 5초)
       await this.waitForWorkers(5000)
 
-      // 3. 서버 종료
+      // 4. 서버 종료
       if (this.server) {
         await new Promise<void>((resolve) => {
           this.server!.close(() => resolve())

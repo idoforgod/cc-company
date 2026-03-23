@@ -37,6 +37,7 @@ async function main() {
     serverUrl,
     config,
     agentConfig,
+    workingDir: basePath,  // project root (process.cwd())
     runClaude: (prompt, ac) => runClaude(prompt, ac, { store, basePath: ccCompanyPath }),
   })
 

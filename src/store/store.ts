@@ -6,9 +6,14 @@ import type {
   RunLog,
   RunLogFilter,
   ProjectConfig,
+  GlobalConfig,
 } from '../types/index.js'
 
 export interface IStore {
+  // Global config
+  getGlobalConfig(): GlobalConfig
+  updateGlobalConfig(updates: Partial<GlobalConfig>): void
+
   // Project config
   getProjectConfig(): ProjectConfig
 

@@ -54,6 +54,7 @@ export class TicketService {
       status: hasCc ? 'blocked' : 'ready',
       createdBy: input.createdBy,
       ccReviewTicketIds: [],
+      metadata: input.metadata,
     })
 
     // cc가 없으면 바로 반환

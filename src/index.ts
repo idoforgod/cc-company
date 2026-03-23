@@ -8,6 +8,7 @@ import { registerSkillCommand } from './commands/skill.js'
 import { registerHookCommand } from './commands/hook.js'
 import { registerStartCommand } from './commands/start.js'
 import { registerTicketCommand } from './commands/ticket.js'
+import { registerWebhookCommand } from './commands/webhook.js'
 
 const program = new Command()
 
@@ -24,5 +25,6 @@ registerSkillCommand(program)
 registerHookCommand(program)
 registerStartCommand(program)
 registerTicketCommand(program)
+registerWebhookCommand(program)
 
 program.parseAsync()
