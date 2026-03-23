@@ -29,8 +29,9 @@
     {
       "phase": 3,
       "name": "webhook-route",
-      "status": "pending",
-      "started_at": "2026-03-23T19:40:11+0900"
+      "status": "completed",
+      "started_at": "2026-03-23T19:40:11+0900",
+      "completed_at": "2026-03-23T19:43:30+0900"
     },
     {
       "phase": 4,
