@@ -96,6 +96,27 @@ export type TicketStatus = 'blocked' | 'ready' | 'in_progress' | 'completed' | '
 export type TicketType = 'task' | 'cc_review'
 export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent'
 
+// ============================================
+// Ticket Metadata Types
+// ============================================
+
+export type TicketSource = 'user' | 'webhook' | 'agent'
+export type GithubEventType = 'review_comment' | 'review_approved' | 'conflict_resolve'
+
+export interface GithubTicketMetadata {
+  repo: string                    // owner/repo
+  prNumber: number
+  prUrl: string
+  commentIds?: string[]           // 묶인 comment IDs (중복 방지용)
+  eventType?: GithubEventType
+  reviewers?: string[]            // requested reviewers (approve 조건 체크용)
+}
+
+export interface TicketMetadata {
+  source?: TicketSource
+  github?: GithubTicketMetadata
+}
+
 export interface Comment {
   id: string
   author: string
@@ -125,6 +146,7 @@ export interface Ticket {
   cancelledAt?: string
   result?: TicketResult
   comments: Comment[]
+  metadata?: TicketMetadata
   version: number
 }
 
@@ -135,6 +157,7 @@ export interface CreateTicketInput {
   cc?: string[]
   priority?: TicketPriority
   createdBy: string
+  metadata?: TicketMetadata
 }
 
 export interface UpdateTicketInput {
@@ -184,7 +207,21 @@ export interface TicketServerConfig {
   heartbeatTimeoutMs: number
 }
 
+// ============================================
+// Webhook Config Types
+// ============================================
+
+export type ApproveCondition = 'any' | 'all'
+
+export interface WebhookConfig {
+  enabled: boolean
+  secret?: string                 // GitHub webhook secret (signature 검증용)
+  smeeUrl?: string                // smee.io 채널 URL (로컬 개발용)
+  approveCondition?: ApproveCondition  // 기본: 'any'
+}
+
 export interface GlobalConfig {
   version: string
   ticketServer?: TicketServerConfig
+  webhook?: WebhookConfig
 }
