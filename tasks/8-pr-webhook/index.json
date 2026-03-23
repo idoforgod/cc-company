@@ -1,0 +1,17 @@
+{
+  "project": "cc-company",
+  "task": "pr-webhook",
+  "prompt": "agent가 사용중인 gh_user에 대해서, 열려있는 본인의 PR에 review comment가 달리면 적절히 파악 후 반영하라는 ticket이 생성되면 좋겠다. 이를 위해 github app 등록 또는 webhook 등록 등의 조치가 필요할 것으로 보인다. 또 열려있는 본인의 PR이 approve 상태가 될때도 ticket이 생성되어 자동으로 base branch로 merge도 하면 좋겠다. 이때 conflict가 있다면 적절히 조치해야한다.",
+  "totalPhases": 8,
+  "created_at": "2026-03-23T15:30:00+0900",
+  "phases": [
+    { "phase": 0, "name": "docs-update", "status": "pending" },
+    { "phase": 1, "name": "types-metadata", "status": "pending" },
+    { "phase": 2, "name": "webhook-receiver", "status": "pending" },
+    { "phase": 3, "name": "webhook-route", "status": "pending" },
+    { "phase": 4, "name": "pr-event-service", "status": "pending" },
+    { "phase": 5, "name": "orchestrator-cli", "status": "pending" },
+    { "phase": 6, "name": "merge-logic", "status": "pending" },
+    { "phase": 7, "name": "tests-guide", "status": "pending" }
+  ]
+}
