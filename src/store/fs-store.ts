@@ -9,6 +9,7 @@ import type {
   RunLog,
   RunLogFilter,
   ProjectConfig,
+  GlobalConfig,
 } from '../types/index.js'
 import {
   parseSubagentMd,
@@ -22,6 +23,28 @@ export class FsStore implements IStore {
 
   constructor(rootPath: string) {
     this.rootPath = rootPath
+  }
+
+  private get configPath(): string {
+    return path.join(this.rootPath, 'config.json')
+  }
+
+  // Global config
+  getGlobalConfig(): GlobalConfig {
+    if (!fs.existsSync(this.configPath)) {
+      return { version: '1.0.0' }
+    }
+    return JSON.parse(fs.readFileSync(this.configPath, 'utf-8'))
+  }
+
+  updateGlobalConfig(updates: Partial<GlobalConfig>): void {
+    const current = this.getGlobalConfig()
+    const updated = { ...current, ...updates }
+    const dir = path.dirname(this.configPath)
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true })
+    }
+    fs.writeFileSync(this.configPath, JSON.stringify(updated, null, 2))
   }
 
   // Project config
