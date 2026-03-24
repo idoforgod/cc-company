@@ -1,54 +1,17 @@
 {
-  "name": "@greatsumini/agentinc",
-  "version": "0.2.0",
-  "description": "Run Claude Code like a company — organize AI agents by role, run them with one command",
-  "main": "dist/index.js",
-  "bin": {
-    "agentinc": "dist/index.js"
-  },
+  "name": "agentinc-monorepo",
+  "private": true,
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "prepublishOnly": "npm run build && npm test"
-  },
-  "type": "module",
-  "keywords": [
-    "claude",
-    "claude-code",
-    "ai",
-    "agent",
-    "cli",
-    "automation",
-    "developer-tools",
-    "ai-agent",
-    "llm"
-  ],
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/greatSumini/agentinc.git"
-  },
-  "homepage": "https://github.com/greatSumini/agentinc#readme",
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "files": [
-    "dist",
-    "LICENSE",
-    "README.md"
-  ],
-  "dependencies": {
-    "commander": "^12.1.0",
-    "express": "^5.2.1",
-    "gray-matter": "^4.0.3",
-    "smee-client": "^5.0.0"
+    "build": "pnpm -r build",
+    "build:web": "pnpm --filter @agentinc/web build && pnpm run copy:web",
+    "copy:web": "rm -rf packages/server/public && cp -r packages/web/dist packages/server/public",
+    "dev": "pnpm -r --parallel dev",
+    "test": "pnpm -r test",
+    "clean": "pnpm -r clean",
+    "prepublish:cli": "pnpm build && pnpm build:web",
+    "publish:cli": "pnpm prepublish:cli && pnpm --filter @agentinc/cli publish"
   },
   "devDependencies": {
-    "@types/express": "^5.0.6",
-    "@types/node": "^22.10.0",
-    "typescript": "^5.7.0",
-    "vitest": "^2.1.0"
+    "typescript": "^5.7.0"
   }
 }
